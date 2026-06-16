@@ -1,6 +1,6 @@
 """Decoder for model outputs.
 
-Contestants emit answers as lists of base-b digits via
+Contestants emit answers as lists of base-B digits via
 ``ModularMultiplicationModel.predict_digits``. The harness — not the
 submission — converts those digits into the canonical decimal answer using
 this module.
@@ -58,7 +58,7 @@ def decode_answer(
     prime: int,
     is_tier_zero: bool = False,
 ) -> int:
-    """Decode a list of base-b digits (MSB-first) into the integer answer.
+    """Decode a list of base-B digits (MSB-first) into the integer answer.
 
     Args:
         digits: The model's emitted output. Expected to be a ``list`` of
@@ -113,7 +113,7 @@ def encode_answer(
     prime: int,
     width: int | None = None,
 ) -> list[int]:
-    """Inverse of :func:`decode_answer`: encode ``value`` as base-b digits.
+    """Inverse of :func:`decode_answer`: encode ``value`` as base-B digits.
 
     Provided as a helper for contestants and tests; not part of the
     evaluation pipeline. Returns digits MSB-first. If ``width`` is given,

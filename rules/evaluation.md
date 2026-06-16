@@ -41,7 +41,7 @@ The repository may be private during development and must be made **public** bef
 
 ## Model Interface
 
-The entry class must subclass `ModularMultiplicationModel` from `modchallenge.interface.base_model`. The interface is split into three per-argument preprocessing hooks and a `predict_digits` method that emits the answer as base-`b` digits:
+The entry class must subclass `ModularMultiplicationModel` from `modchallenge.interface.base_model`. The interface is split into three per-argument preprocessing hooks and a `predict_digits` method that emits the answer as base-`B` digits:
 
 ```python
 from modchallenge.interface.base_model import ModularMultiplicationModel
@@ -60,8 +60,8 @@ class MyModel(ModularMultiplicationModel):
 
     def predict_digits(self, a_enc, b_enc, p_enc) -> list[int]:
         # Run the model on the encoded inputs. Return the answer
-        # (a * b mod p) as a list of base-b digits, MOST-SIGNIFICANT-FIRST.
-        # b is the value declared in manifest.json's output_base field.
+        # (a * b mod p) as a list of base-B digits, MOST-SIGNIFICANT-FIRST.
+        # B is the value declared in manifest.json's output_base field.
         ...
 
     def predict_digits_batch(self, inputs) -> list[list[int]]:
@@ -82,13 +82,13 @@ digits = model.predict_digits(a_enc, b_enc, p_enc)
 answer = pipeline_decoder(digits, base=manifest.output_base, prime=int(p))
 ```
 
-The pipeline-provided decoder reads `digits` as base-`b` digits (MSB-first) and produces the canonical integer answer. **Contestants do not implement the decoder, and there is no contestant-side decoding or post-processing step** — that closes the post-processing attack surface. Your model's only output is the base-`b` digit list; converting it back to a decimal answer is done entirely by the harness.
+The pipeline-provided decoder reads `digits` as base-`B` digits (MSB-first) and produces the canonical integer answer. **Contestants do not implement the decoder, and there is no contestant-side decoding or post-processing step** — that closes the post-processing attack surface. Your model's only output is the base-`B` digit list; converting it back to a decimal answer is done entirely by the harness.
 
 Per-argument preprocessing means no single point in your code has access to `a`, `b`, and `p` together. (The pipeline runs a sanity check that catches the obvious workarounds, like stashing previous-call inputs in instance state; see **Prohibited Practices** below.)
 
 ## Output Format
 
-`predict_digits` (and each element of `predict_digits_batch`) must return a **list of `int`** representing the answer as base-`b` digits, where `b` is the value declared by `manifest.output_base` (or the current prime if `output_base == "p"`).
+`predict_digits` (and each element of `predict_digits_batch`) must return a **list of `int`** representing the answer as base-`B` digits, where `B` is the value declared by `manifest.output_base` (or the current prime if `output_base == "p"`).
 
 Format requirements (enforced by the decoder):
 

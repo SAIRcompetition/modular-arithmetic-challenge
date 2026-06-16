@@ -76,7 +76,7 @@ workflow.
 
 The interface is intentionally narrow: three per-argument preprocessing hooks (each only ever
 sees its own argument) and one `predict_digits` method that emits the answer as a list of
-base-`b` digits. The harness — not your code — decodes those digits into the final answer.
+base-`B` digits. The harness — not your code — decodes those digits into the final answer.
 
 ```python
 # model.py
@@ -102,8 +102,8 @@ class MyModel(ModularMultiplicationModel):
 
     def predict_digits(self, a_enc, b_enc, p_enc) -> list[int]:
         # Run the model on the encoded inputs. Return the answer
-        # (a * b mod p) as base-b digits, MOST-SIGNIFICANT-FIRST.
-        # b = the value declared in manifest.json's output_base field.
+        # (a * b mod p) as base-B digits, MOST-SIGNIFICANT-FIRST.
+        # B = the value declared in manifest.json's output_base field.
         # For example, with output_base = 10 and answer = 52, return [5, 2].
         ...
 
@@ -148,7 +148,7 @@ hand-code the arithmetic (schoolbook long multiplication, long division, Montgom
 reduction, CRT recombination) over the input values — **whether in Python integers or in tensor
 operations**. Such code returns the right answer regardless of the weights, which makes it a
 computational circuit, not a learned model. There is also no contestant-side decoding step: your
-only output is the base-`b` digit list, and the harness converts it to the answer.
+only output is the base-`B` digit list, and the harness converts it to the answer.
 
 The full boundary, the two governing principles, and the enforcement (static analysis,
 weight-perturbation signal, manual review) are in

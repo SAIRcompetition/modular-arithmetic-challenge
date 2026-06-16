@@ -74,10 +74,10 @@ class ModularMultiplicationModel(ABC):
 
     @abstractmethod
     def predict_digits(self, a_enc: Any, b_enc: Any, p_enc: Any) -> list[int]:
-        """Return the answer ``(a * b) mod p`` as a list of base-b digits.
+        """Return the answer ``(a * b) mod p`` as a list of base-B digits.
 
         Digits are **most-significant-first**; each must be ``int`` in
-        ``[0, base - 1]`` where ``base`` is the value declared in the
+        ``[0, B - 1]`` where ``B`` is the value declared in the
         manifest's ``output_base`` field (or the current prime ``p`` if the
         manifest declares ``output_base = "p"``).
 

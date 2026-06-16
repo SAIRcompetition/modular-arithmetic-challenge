@@ -49,7 +49,7 @@ Your model receives three decimal strings `a`, `b`, `p` and must compute `(a * b
 - `p >= 2` is prime (up to ~617 decimal digits)
 - `a` and `b` can be much larger than `p`
 
-**Output:** the integer `(a * b) mod p`. Your model emits it as a list of base-`b` digits through the interface (see **Model Requirements**); the harness converts those digits into the canonical answer. There is no contestant-side decoding step.
+**Output:** the integer `(a * b) mod p`. Your model emits it as a list of base-`B` digits through the interface (see **Model Requirements**); the harness converts those digits into the canonical answer. There is no contestant-side decoding step.
 
 **Example:**
 ```
@@ -57,7 +57,7 @@ a = "123456789", b = "987654321", p = "97"
 answer = "52"   # because (123456789 * 987654321) % 97 == 52
 ```
 
-This is a pure mathematical reasoning challenge. The official contract is fixed: your model receives the three decimal strings `(a, b, p)` (after a per-argument preprocessing pass you control) and emits the answer as a list of base-`b` digits. The harness decodes those digits into the canonical integer answer — there is no contestant-side decoding step. **Internally your model may use any representation** — digit-level tokens, p-adic, CRT decomposition, other bases, custom embeddings — as long as the answer is genuinely produced by your model's *trained parameters*, not by an arithmetic algorithm hand-coded into the model or any other shortcut. See **Prohibited Practices** below for the precise boundary.
+This is a pure mathematical reasoning challenge. The official contract is fixed: your model receives the three decimal strings `(a, b, p)` (after a per-argument preprocessing pass you control) and emits the answer as a list of base-`B` digits. The harness decodes those digits into the canonical integer answer — there is no contestant-side decoding step. **Internally your model may use any representation** — digit-level tokens, p-adic, CRT decomposition, other bases, custom embeddings — as long as the answer is genuinely produced by your model's *trained parameters*, not by an arithmetic algorithm hand-coded into the model or any other shortcut. See **Prohibited Practices** below for the precise boundary.
 
 For the breakdown of difficulty tiers, the test-generation procedure, and the scoring rules used by the official evaluation, see [evaluation.md](evaluation.md).
 
@@ -78,8 +78,8 @@ New contestants should start from `examples/`: three small, compliant reference 
 
 ## Model Requirements
 
-- Submissions must implement the `ModularMultiplicationModel` Python interface. The interface is split into three per-argument preprocessing hooks (`preprocess_a`, `preprocess_b`, `preprocess_p`) and a single `predict_digits` method that returns the answer as a list of base-`b` digits, MSB-first.
-- The model declares the base `b` it uses in `manifest.json` via the `output_base` field. Allowed values: any integer in `[2, 2^32]`, or the string `"p"` (meaning "use the current prime as the base").
+- Submissions must implement the `ModularMultiplicationModel` Python interface. The interface is split into three per-argument preprocessing hooks (`preprocess_a`, `preprocess_b`, `preprocess_p`) and a single `predict_digits` method that returns the answer as a list of base-`B` digits, MSB-first.
+- The model declares the base `B` it uses in `manifest.json` via the `output_base` field. Allowed values: any integer in `[2, 2^32]`, or the string `"p"` (meaning "use the current prime as the base").
 - The pipeline-provided decoder — not the contestant's code — converts the model's emitted digit list into the canonical integer answer and compares it against the ground truth. Contestants do not write post-processing code.
 - Submissions must be deterministic.
 - Any architecture **implementable within the supported sandbox runtime** is allowed: Transformer, RNN, CNN, hybrid, or novel approaches. There is no architecture whitelist and Turing-complete / recurrent models are not prohibited as such; what matters is that the answer is produced by *trained parameters*, not by an arithmetic procedure hand-coded into the model (see **Prohibited Practices** and the model/circuit boundary in [evaluation.md](evaluation.md)). The runtime contract (initially centered on PyTorch; broader runtime support such as JAX, TensorFlow, ONNX may be added based on contestant demand) is documented in [evaluation.md](evaluation.md).
