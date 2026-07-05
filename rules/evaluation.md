@@ -256,6 +256,8 @@ If a model uses any source of randomness internally (sampling, dropout at infere
 
 **Allowed:** any per-argument representation work inside a single hook (`int()`, base conversion, modular arithmetic on small intermediates, p-adic decomposition, CRT splitting against fixed small moduli, byte encoding, …), and any *learned* computation inside the model. The constraint is not what the internal computation looks like — it is where the answer comes from.
 
+In particular, a loop that feeds the model its input tokens one at a time is a valid deterministic encoder, so long as the encoder receives **no feedback** from the model to help it choose the next token.
+
 **Two principles decide whether the model is really computing the answer:**
 
 1. **The emitted digits must materially determine the answer.** If `predict_digits` could return garbage and the answer would still come out right (e.g. precomputed in preprocessing), you are computing it outside the model.

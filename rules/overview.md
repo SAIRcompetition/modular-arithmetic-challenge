@@ -124,6 +124,8 @@ The following are **not allowed at inference time**:
 
 **What is explicitly allowed:** using `int()`, base conversion, modular arithmetic on small intermediate values, or any other standard operation **inside a single per-argument preprocessing hook** (operating only on its own argument) or **inside the model itself** (provided the answer is produced by the model's trained parameters, not by a hard-coded shortcut or a by-construction arithmetic algorithm; see the two principles and the model/circuit boundary in [evaluation.md](evaluation.md)).
 
+In particular, a loop that feeds the model its input tokens one at a time is a valid deterministic encoder, so long as the encoder receives **no feedback** from the model to help it choose the next token.
+
 Submissions found to violate these rules will be disqualified. Sandbox configuration, static-analysis checks, and the planned behavioral signals (weight perturbation, distribution shift, latency profile) are documented in [evaluation.md](evaluation.md).
 
 ## Team Participation and Anti-Cheating Policy
