@@ -115,6 +115,7 @@ The interface is designed so that the most obvious attack paths are structurally
 The following are **not allowed at inference time**:
 
 - **Computing the final answer** `(a * b) mod p` using symbolic-math libraries (`sympy`, `gmpy2`, `mpmath`, `flint`, etc.) or Python's built-in arbitrary-precision integer arithmetic on the original `(a, b, p)` arguments (e.g. by stashing them in instance state across preprocessing hooks and recombining inside `predict_digits`).
+- **Deterministically pre-reducing the operands**: computing `a mod p`, `b mod p`, or any equivalent reduction of the full-width operands against the actual `p` in non-learned code before the model runs. The model must receive the raw `(a, b, p)` — reducing the full-width operands is itself a core part of the task.
 - **Hard-coded answers** or lookup tables indexed by the evaluation inputs (or by hashes / fingerprints of them).
 - Dynamic code execution: `eval`, `exec`, `compile`, `__import__`, `ctypes`.
 - Network access of any kind.

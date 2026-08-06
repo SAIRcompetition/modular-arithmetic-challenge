@@ -15,12 +15,13 @@ separate download or training step required. `always_zero` needs no weights.
 | Model | What it is | overall_accuracy (1100) | Compliant |
 |---|---|---|---|
 | [`always_zero/`](always_zero/README.md) | Emits `[0]` for everything. Pipeline smoke test + leaderboard floor. | 0.079 | trivially |
-| [`digit_transformer/`](digit_transformer/README.md) | ~544K-param decoder-only Transformer; reduces operands `mod p` inside `predict_digits`, learns small-number mod-multiplication. | 0.121 | yes |
-| [`dlp_grokking/`](dlp_grokking/README.md) | ~6M-param discrete-log "grokking" model: shared residue encoder + **additive** (log-space) bottleneck + learned decoder. | **0.127** | yes |
+| [`digit_transformer/`](digit_transformer/README.md) | ~544K-param decoder-only Transformer fed the raw `(a, b, p)`; learns full-width reduction + mod-multiplication end-to-end. | **0.103** | yes |
+| [`dlp_grokking/`](dlp_grokking/README.md) | ~6M-param discrete-log "grokking" model: **learned** streaming reducer (raw digits, feedback-free schedule) + shared residue encoder + **additive** (log-space) bottleneck + learned decoder. | 0.093 | yes |
 
 All three are deterministic and pass `modchallenge check`. Tier 1 (the 4 fixed primes
-`{2,3,5,7}`) is where the neural models grok cleanly; tier 2+ is the honest ceiling — see each
-model's README for the per-tier breakdown and why. The `dlp_grokking` README is the most detailed
+`{2,3,5,7}`) is where the neural models score best (0.83 / 0.74) — now that they must learn the
+reduction of the raw operands themselves, even tier 1 is no longer a free grok; tier 2+ is the
+honest ceiling — see each model's README for the per-tier breakdown and why. The `dlp_grokking` README is the most detailed
 worked example of turning a mathematical insight into a compliant inductive bias.
 
 ## Run the in-repo examples (no HuggingFace token)
@@ -46,8 +47,9 @@ trainer needs `sympy` for prime generation (blocklisted inside a submission, so 
 gitignored `exploration/`):
 
 ```bash
-.venv312/bin/python examples/dlp_grokking/train.py --minutes 8
-.venv312/bin/python examples/exploration/train_digit_transformer.py --steps 6000   # local dev only
+.venv312/bin/python examples/dlp_grokking/train.py --minutes 8          # DLP core (residue space)
+.venv312/bin/python examples/dlp_grokking/train_reducer.py              # learned streaming reducer
+.venv312/bin/python examples/exploration/train_digit_transformer.py --steps 20000   # local dev only
 ```
 
 To reproduce the **public benchmark** numbers in the table (100 problems/tier, public seed):

@@ -21,11 +21,15 @@ no ``(log_a + log_b) % (p-1)`` written in Python. Perturb the weights and the
 accuracy degrades, which is the operational test for "the answer came from
 learning, not from a hand-coded circuit" (see rules/evaluation.md, Principle 2).
 
-Compliance note on the ``a % p`` / ``b % p`` reduction below: this is the same
-input-normalisation step the digit_transformer baseline uses. It combines two
-arguments at a time (a with p, then b with p), never all three, and does not
-compute the modular product itself — the network output materially determines
-the answer. The hard part (multiplication in the residue field) is learned.
+Compliance note on operand reduction: the rules prohibit deterministically
+computing ``a % p`` / ``b % p`` in non-learned code — the model must receive
+the raw ``(a, b, p)`` and the reduction itself must come from trained
+parameters. Here reduction is performed by ``StreamingDigitReducer``, a
+*learned* recurrent cell that consumes the raw operand's decimal digits one
+at a time (a fixed, feedback-free feeding schedule — the deterministic-
+encoder pattern the rules explicitly allow) and whose trained weights carry
+out the residue update ``r' = (10*r + d) mod p``. Randomise the reducer's
+weights and the residues (and hence the answers) collapse.
 
 Like all small-modulus approaches, this only works where the field is small
 enough for the structure to be learned and to generalise across primes — i.e.
@@ -73,6 +77,68 @@ def _digits_fixed(n: int, width: int = WIDTH) -> list[int]:
 # ---------------------------------------------------------------------------
 # Architecture
 # ---------------------------------------------------------------------------
+
+class StreamingDigitReducer(nn.Module):
+    """Learned modular reduction: raw operand digits -> residue digits.
+
+    Consumes the decimal digits of a raw operand ONE AT A TIME (MSB-first)
+    with a recurrent cell, conditioned on the prime; after the last digit it
+    emits the residue ``n mod p`` as WIDTH digit distributions.
+
+    The feeding schedule is fixed and input-determined — digit t is pushed
+    at step t regardless of the model's state or output (the feedback-free
+    token-feeding loop the rules allow as a deterministic encoder). The
+    update itself — tracking ``r' = (10*r + d) mod p`` — lives entirely in
+    the trained GRU weights. During training every prefix is supervised
+    (predict ``prefix mod p`` after each digit), which is what makes the
+    learned transition track the exact residue instead of drifting.
+
+    Left-padding an operand with 0-digits is value-neutral (leading zeros);
+    training includes such padding so batched, length-padded inference is
+    safe.
+    """
+
+    def __init__(self, d_model: int = 256, digit_dim: int = 32):
+        super().__init__()
+        self.digit_emb = nn.Embedding(VOCAB_SIZE, digit_dim)
+        self.prime_tok_emb = nn.Embedding(VOCAB_SIZE, d_model)
+        self.prime_pos_emb = nn.Embedding(WIDTH, d_model)
+        self.cell = nn.GRUCell(digit_dim + d_model, d_model)
+        self.h0 = nn.Parameter(torch.zeros(d_model))
+        self.heads = nn.ModuleList([nn.Linear(d_model, 10) for _ in range(WIDTH)])
+        self.register_buffer("prime_pos_ids", torch.arange(WIDTH), persistent=False)
+        self.config = dict(d_model=d_model, digit_dim=digit_dim)
+
+    def _prime_context(self, prime_digits: torch.Tensor) -> torch.Tensor:
+        pe = self.prime_tok_emb(prime_digits) + self.prime_pos_emb(
+            self.prime_pos_ids.unsqueeze(0)
+        )
+        return pe.mean(dim=1)  # (B, d_model)
+
+    def forward(
+        self,
+        operand_digits: torch.Tensor,
+        prime_digits: torch.Tensor,
+        all_steps: bool = False,
+    ) -> torch.Tensor:
+        """operand_digits: (B, L) decimal digits MSB-first (0-left-padded).
+        Returns (B, WIDTH, 10) logits for the final residue, or
+        (B, L, WIDTH, 10) for every prefix when ``all_steps`` (training)."""
+        bsz, length = operand_digits.shape
+        p_ctx = self._prime_context(prime_digits)
+        h = self.h0.unsqueeze(0).expand(bsz, -1)
+        step_logits = []
+        for t in range(length):
+            d = self.digit_emb(operand_digits[:, t])
+            h = self.cell(torch.cat([d, p_ctx], dim=1), h)
+            if all_steps:
+                step_logits.append(
+                    torch.stack([head(h) for head in self.heads], dim=1)
+                )
+        if all_steps:
+            return torch.stack(step_logits, dim=1)  # (B, L, WIDTH, 10)
+        return torch.stack([head(h) for head in self.heads], dim=1)  # (B, WIDTH, 10)
+
 
 class ResidueEncoder(nn.Module):
     """Encode a (residue, prime) pair into a single vector via a small
@@ -178,6 +244,7 @@ class DLPGrokNet(nn.Module):
 class DLPGrokking(ModularMultiplicationModel):
     def __init__(self):
         self.model: DLPGrokNet | None = None
+        self.reducer: StreamingDigitReducer | None = None
         self.device: torch.device | None = None
 
     def load(self, model_dir: str) -> None:
@@ -198,6 +265,11 @@ class DLPGrokking(ModularMultiplicationModel):
         self.model.to(self.device)
         self.model.eval()
 
+        self.reducer = StreamingDigitReducer(**ckpt.get("reducer_config", {}))
+        self.reducer.load_state_dict(ckpt["reducer_state_dict"])
+        self.reducer.to(self.device)
+        self.reducer.eval()
+
     def preprocess_a(self, a):
         return a
 
@@ -213,34 +285,50 @@ class DLPGrokking(ModularMultiplicationModel):
 
     @torch.no_grad()
     def predict_digits_batch(self, inputs):
-        assert self.model is not None
+        assert self.model is not None and self.reducer is not None
         out: list[list[int] | None] = [None] * len(inputs)
 
-        a_rows, b_rows, p_rows, idx = [], [], [], []
+        a_digit_rows, b_digit_rows, p_rows, idx = [], [], [], []
         for i, (a_enc, b_enc, p_enc) in enumerate(inputs):
             p = int(p_enc)
             # Out of the model's small-prime regime: it never learned this.
             # Emit 0 (the honest fallback) without invoking the network.
+            # (Comparing p against the regime bound selects which model path
+            # runs; it computes nothing toward the answer.)
             if p >= 10 ** WIDTH:
                 out[i] = [0]
                 continue
-            a_red = int(a_enc) % p
-            b_red = int(b_enc) % p
-            a_rows.append(_digits_fixed(a_red))
-            b_rows.append(_digits_fixed(b_red))
+            # RAW operand digits — reduction happens in the learned reducer.
+            a_digit_rows.append([int(c) for c in str(a_enc)])
+            b_digit_rows.append([int(c) for c in str(b_enc)])
             p_rows.append(_digits_fixed(p))
             idx.append(i)
 
         if idx:
-            a_t = torch.tensor(a_rows, dtype=torch.long, device=self.device)
-            b_t = torch.tensor(b_rows, dtype=torch.long, device=self.device)
             p_t = torch.tensor(p_rows, dtype=torch.long, device=self.device)
-            logits = self.model(a_t, b_t, p_t)  # (N, WIDTH, 10)
+            a_res = self._learned_reduce(a_digit_rows, p_t)  # (N, WIDTH)
+            b_res = self._learned_reduce(b_digit_rows, p_t)
+            logits = self.model(a_res, b_res, p_t)  # (N, WIDTH, 10)
             preds = logits.argmax(dim=-1).tolist()  # N x WIDTH
             for j, i in enumerate(idx):
                 out[i] = preds[j]  # MSB-first; harness ignores leading zeros
 
         return [o if o is not None else [0] for o in out]
+
+    def _learned_reduce(
+        self, digit_rows: list[list[int]], p_t: torch.Tensor
+    ) -> torch.Tensor:
+        """Run the learned streaming reducer over raw operand digits.
+
+        0-left-pads rows to the batch max length (value-neutral, and part of
+        the reducer's training distribution), then takes the argmax residue
+        digits. Discretising an internal module's output before the next
+        module is model-internal computation, not post-processing."""
+        max_len = max(len(r) for r in digit_rows)
+        padded = [[0] * (max_len - len(r)) + r for r in digit_rows]
+        ops = torch.tensor(padded, dtype=torch.long, device=self.device)
+        res_logits = self.reducer(ops, p_t)  # (N, WIDTH, 10)
+        return res_logits.argmax(dim=-1)  # (N, WIDTH) residue digits
 
     def max_batch_size(self) -> int:
         return 512

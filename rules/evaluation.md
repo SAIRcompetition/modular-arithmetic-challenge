@@ -250,6 +250,7 @@ If a model uses any source of randomness internally (sampling, dropout at infere
 
 - Computing the answer with symbolic-math libraries (`sympy`, `gmpy2`, `mpmath`, `flint`, …) or with built-in big-integer arithmetic on the original `(a, b, p)` (e.g. stashing them across the preprocess hooks and recombining inside `predict_digits`).
 - **Hand-coding the arithmetic** — schoolbook multiplication, long division, Barrett/Montgomery reduction, CRT recombination over the actual `(a, b, p)` — **whether in Python integers or in tensor / array operations**. Such code is correct for *any* weights, so the weights aren't what solve the problem: that is a computational circuit, not a learned model.
+- **Deterministically pre-reducing the operands** — computing `a mod p`, `b mod p`, or any equivalent reduction of the full-width operands against the actual `p` in non-learned code before the model runs. The model must receive the raw `(a, b, p)`; reducing the full-width operands is itself a core part of the task (see the tier table: operands may be much larger than `p` precisely so that genuine reduction is tested).
 - Hard-coding answers, lookup tables indexed by the inputs, or hashes / fingerprints of the evaluation set into the weights or code.
 - **Cross-argument leakage**: a `preprocess_a` call depending on a previously-seen `b` or `p` (and likewise for the others).
 - `eval` / `exec` / `compile` / `__import__` of arbitrary modules / `ctypes`, network access, reading outside the submission directory, or spawning subprocesses.
@@ -304,10 +305,10 @@ The repository ships three small, **compliant** reference models under `examples
 | Model | What it is | overall_accuracy (public, 1100) |
 |-------|------------|---------------------------------|
 | `always_zero` | Emits `[0]` for every problem — pipeline smoke test and leaderboard floor. | 0.079 |
-| `digit_transformer` | ~544K-param decoder-only Transformer; reduces operands `mod p` inside `predict_digits`, then learns small-number modular multiplication. | 0.121 |
-| `dlp_grokking` | ~6M-param discrete-log "grokking" model: a shared residue encoder, an additive (log-space) bottleneck, and a learned decoder. | 0.127 |
+| `digit_transformer` | ~544K-param decoder-only Transformer fed the raw `(a, b, p)`; learns full-width reduction and modular multiplication end-to-end. | 0.103 |
+| `dlp_grokking` | ~6M-param discrete-log "grokking" model: a learned streaming reducer (raw operand digits fed one at a time on a feedback-free schedule), a shared residue encoder, an additive (log-space) bottleneck, and a learned decoder. | 0.093 |
 
-All three are deterministic and pass the static check. None hand-codes the arithmetic — each produces its answer through the trained model — so they sit on the compliant side of the line: the two neural models genuinely learn Tier 1 (the fixed primes `{2,3,5,7}`) and degrade honestly on the higher tiers rather than faking them. `dlp_grokking` is the most detailed worked example of turning a mathematical insight (`a*b mod p` as addition in discrete-log space) into a *learned* inductive bias.
+All three are deterministic and pass the static check. None hand-codes the arithmetic — reduction included: both neural models receive the **raw** `(a, b, p)` and produce the answer through trained parameters (deterministic pre-reduction of the operands is a prohibited practice; see above) — so they sit on the compliant side of the line, degrading honestly on the tiers they haven't learned rather than faking them. `dlp_grokking` is the most detailed worked example of the boundary: a *learned* streaming reducer using the allowed feedback-free digit-feeding schedule, plus a mathematical insight (`a*b mod p` as addition in discrete-log space) turned into a *learned* inductive bias.
 
 Run any of them locally:
 

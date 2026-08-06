@@ -5,8 +5,16 @@ Sequence: BOS A_digits SEP B_digits SEP P_digits EQ <answer_digits> EOS
 At inference, the model is fed up to EQ inclusive and autoregressively
 generates the answer digits until EOS or the max-output budget.
 
-Per-argument preprocessing produces digit lists; predict_digits assembles
-the prompt, runs greedy generation, and returns the emitted base-10 digits.
+The model receives the RAW decimal strings (a, b, p) — no deterministic
+pre-reduction. Reducing the full-width operands mod p is itself part of the
+task, and the rules prohibit computing `a % p` / `b % p` in non-learned code
+before the model runs; the network has to learn the reduction from data.
+Problems whose raw prompt exceeds the trained context length are honestly
+out of range and return [] (scored wrong).
+
+Per-argument preprocessing passes the strings through; predict_digits
+assembles the prompt, runs greedy generation, and returns the emitted
+base-10 digits.
 """
 
 from __future__ import annotations
@@ -141,16 +149,12 @@ class DigitTransformer(ModularMultiplicationModel):
     @torch.no_grad()
     def predict_digits(self, a_enc, b_enc, p_enc):
         assert self.model is not None
-        # Reduce a, b modulo p before feeding to the model. The model only
-        # ever sees inputs in [0, p), so it only has to learn modular
-        # multiplication of small numbers — not big-number reduction.
-        # This combines two arguments at a time (a with p, then b with p),
-        # never all three; it does not perform the final modular product
-        # itself. The model output materially determines the answer.
-        p = int(p_enc)
-        a_red = int(a_enc) % p
-        b_red = int(b_enc) % p
-        prompt = build_prompt(str(a_red), str(b_red), str(p))
+        # Feed the RAW decimal strings. No deterministic pre-reduction:
+        # computing a % p / b % p in non-learned code before the model runs
+        # is prohibited — reducing the full-width operands is part of what
+        # the network must learn (see rules/evaluation.md, Prohibited
+        # Practices).
+        prompt = build_prompt(str(a_enc), str(b_enc), str(p_enc))
         if len(prompt) > self.model.max_len - 1:
             # Prompt itself doesn't fit; we can't usefully predict.
             return []
