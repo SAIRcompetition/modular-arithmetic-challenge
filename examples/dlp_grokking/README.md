@@ -55,9 +55,15 @@ Reduction of the raw operands is **learned**, not hand-coded: the rules prohibit
 consumes each raw operand's decimal digits one at a time (a fixed, feedback-free feeding
 schedule: the deterministic-encoder pattern the rules explicitly allow) and emits the residue.
 Its trained weights carry out the DFA update `r' = (10*r + d) mod p`; randomise them and the
-residues, and hence the answers, collapse. For `p >= 10^5` (out of the small-prime regime the
-model can learn) the model emits `0` without invoking the network — the honest fallback rather
-than a guess.
+residues, and hence the answers, collapse.
+
+Every problem goes through the network — including primes far wider than the model's 5-digit
+slot, which it has no hope of handling. An earlier revision short-circuited `p >= 10^5` to `0`
+without invoking the network; the rules do not forbid such a fallback, but it is non-learned code
+emitting an answer, and it quietly collected the same ~8% that the trivial `always_zero` baseline
+scores. It is gone. The only non-learned step left in the inference path is tokenisation into the
+fixed-width slots, which reads each argument's own decimal representation and does no arithmetic
+against the others.
 
 ## Training
 
@@ -93,7 +99,8 @@ decode → score):
 
 | Total problems | overall_accuracy | deterministic |
 |---|---|---|
-| **1100** | **0.093** | True |
+| 110 | 0.170 | True |
+| **1100** | **0.085** | True |
 
 Per-tier at total=1100:
 
@@ -102,16 +109,19 @@ Per-tier at total=1100:
 | 1 | **0.740** | 4 fixed primes {2,3,5,7}. The DLP core groks this regime perfectly *in residue space*; the 26% loss is entirely the learned reducer mis-reducing some raw 32-bit operands |
 | 2 | 0.050 | random primes in [16,255], 48-bit raw operands; reducer errors compound with the core's own tier-2 ceiling |
 | 3 | 0.000 | ~6500 primes, 64-bit raw operands; neither stage survives |
-| 4-10 | 0.020 | `p >= 10^5` → honest 0 fallback; scores come from a=0 / b=0 edge cases |
+| 4 | 0.000 | out of the learnable regime entirely |
+| 5-10 | 0.010 | `p` is far wider than the 5-digit slot; the network still answers and is right only on trivial `a`/`b = 0` cases |
 
-This now trails `digit_transformer` (0.103) overall: forcing the reduction into learned weights
-costs this two-stage design more than it costs the end-to-end Transformer. An earlier revision
-that hand-reduced the operands in Python scored 0.127 with a perfect tier 1 — that pattern is a
-prohibited practice (deterministic pre-reduction), and the delta is the honest price of the rule.
+This now trails `digit_transformer` (0.094) overall: forcing the reduction into learned weights
+costs this two-stage design more than it costs the end-to-end Transformer. Two earlier revisions
+scored higher for reasons that do not count — 0.127 when the operands were hand-reduced in Python
+(deterministic pre-reduction, a prohibited practice) and 0.093 when large primes were
+short-circuited to a `0` fallback (permitted, but non-learned code answering). The gap between
+0.127 and 0.085 is what those two shortcuts were worth, and giving it up is the point.
 
 ## What we learned (the honest ceiling)
 
-A decisive A/B test (`exploration/_dlp_grokking_dev/experiment_ab.py`) trained the **same**
+A decisive A/B test (run in the gitignored `exploration/` dev tree, not shipped) trained the **same**
 network twice, changing only the bottleneck:
 
 - **A — additive** `z = e_a + e_b` (the DLP bias): tier-2 val 0.075
@@ -147,6 +157,21 @@ Compliant:
   practice). The digit-feeding loop is fixed and feedback-free — the deterministic-encoder
   pattern the rules allow; the arithmetic of the update is entirely in trained weights.
 - No discrete-log table, generator search, or hand-coded modular arithmetic — the reduction and
-  the multiplication are both in trained weights. Perturbing them degrades accuracy.
+  the multiplication are both in trained weights. There is no `%` or `//` anywhere in `model.py`
+  outside the docstrings.
+- **No non-learned code emits an answer.** The inference path is branch-free: no comparison
+  against `a`, `b` or `p` short-circuits the network, and there is no fallback value. (The rules
+  permit an out-of-range fallback; this example gives it up anyway so the boundary is
+  unambiguous.)
+- Perturbing the weights collapses the model, which is the operational test that the answer came
+  from learning. Measured on 300 tier-1 problems (primes {2,3,5,7}, raw 32-bit operands):
+
+  | Weights | Accuracy |
+  |---|---|
+  | trained | 0.667 |
+  | reducer randomised | 0.110 |
+  | DLP core randomised | 0.000 |
+
+  Random guessing over these primes is ~0.26, so both stages are genuinely load-bearing.
 - Passes `modchallenge check` static analysis.
 - Deterministic (`eval()` mode, no dropout, no sampling).

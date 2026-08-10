@@ -9,8 +9,11 @@ The model receives the RAW decimal strings (a, b, p) — no deterministic
 pre-reduction. Reducing the full-width operands mod p is itself part of the
 task, and the rules prohibit computing `a % p` / `b % p` in non-learned code
 before the model runs; the network has to learn the reduction from data.
-Problems whose raw prompt exceeds the trained context length are honestly
-out of range and return [] (scored wrong).
+Every problem is answered by the network. Prompts longer than the trained
+context are clipped to the rightmost window (a tokenisation limit imposed by
+the finite positional-embedding table); the model then answers from what it
+can see and is simply wrong when that is not enough. No branch in this file
+inspects the inputs and emits an answer of its own.
 
 Per-argument preprocessing passes the strings through; predict_digits
 assembles the prompt, runs greedy generation, and returns the emitted
@@ -155,9 +158,14 @@ class DigitTransformer(ModularMultiplicationModel):
         # the network must learn (see rules/evaluation.md, Prohibited
         # Practices).
         prompt = build_prompt(str(a_enc), str(b_enc), str(p_enc))
-        if len(prompt) > self.model.max_len - 1:
-            # Prompt itself doesn't fit; we can't usefully predict.
-            return []
+        # The positional-embedding table is finite, so a prompt longer than
+        # the trained context cannot be fed in full. Keep the rightmost
+        # window — a fixed, input-determined tokenisation limit, not a
+        # decision about the answer. Earlier revisions returned [] here,
+        # which decodes to 0 and therefore had non-learned code emitting an
+        # answer; now the network answers every problem and is simply wrong
+        # on the ones whose inputs it cannot see.
+        prompt = prompt[-(self.model.max_len - 1):]
 
         # Greedy autoregressive generation
         tokens = torch.tensor([prompt], dtype=torch.long, device=self.device)
@@ -177,6 +185,7 @@ class DigitTransformer(ModularMultiplicationModel):
                 [tokens, torch.tensor([[next_id]], device=self.device)], dim=1
             )
 
-        # Strip any leading zeros (canonical decoded value is the integer; the
-        # harness decoder ignores leading zeros, so this is purely cosmetic).
-        return out_digits if out_digits else [0]
+        # Return exactly what the model emitted. No substituted fallback: an
+        # empty emission decodes to 0 on its own, and picking that value in
+        # Python would be the code answering rather than the network.
+        return out_digits

@@ -15,14 +15,23 @@ separate download or training step required. `always_zero` needs no weights.
 | Model | What it is | overall_accuracy (1100) | Compliant |
 |---|---|---|---|
 | [`always_zero/`](always_zero/README.md) | Emits `[0]` for everything. Pipeline smoke test + leaderboard floor. | 0.079 | trivially |
-| [`digit_transformer/`](digit_transformer/README.md) | ~544K-param decoder-only Transformer fed the raw `(a, b, p)`; learns full-width reduction + mod-multiplication end-to-end. | **0.103** | yes |
-| [`dlp_grokking/`](dlp_grokking/README.md) | ~6M-param discrete-log "grokking" model: **learned** streaming reducer (raw digits, feedback-free schedule) + shared residue encoder + **additive** (log-space) bottleneck + learned decoder. | 0.093 | yes |
+| [`digit_transformer/`](digit_transformer/README.md) | ~544K-param decoder-only Transformer fed the raw `(a, b, p)`; learns full-width reduction + mod-multiplication end-to-end. | **0.094** | yes |
+| [`dlp_grokking/`](dlp_grokking/README.md) | ~6M-param discrete-log "grokking" model: **learned** streaming reducer (raw digits, feedback-free schedule) + shared residue encoder + **additive** (log-space) bottleneck + learned decoder. | 0.085 | yes |
 
 All three are deterministic and pass `modchallenge check`. Tier 1 (the 4 fixed primes
 `{2,3,5,7}`) is where the neural models score best (0.83 / 0.74) — now that they must learn the
 reduction of the raw operands themselves, even tier 1 is no longer a free grok; tier 2+ is the
 honest ceiling — see each model's README for the per-tier breakdown and why. The `dlp_grokking` README is the most detailed
 worked example of turning a mathematical insight into a compliant inductive bias.
+
+Note how close the overall numbers sit to `always_zero`'s 0.079. That is not a bug: the neural
+models earn a real tier 1 and then score ~0 everywhere else, while `always_zero` picks up ~8%
+across all tiers from problems whose answer happens to be 0. Neither neural example emits a
+fallback value or branches on `a`, `b` or `p` — every problem is answered by the network, so
+nothing catches them when they fall. Emitting `0` when your model is out of its depth is *not*
+against the rules, and it would raise these numbers; the reference models forgo it so that the
+learned/non-learned boundary in them is unambiguous. `overall_accuracy` alone is a poor read on a
+model this early — look at the per-tier tables.
 
 ## Run the in-repo examples (no HuggingFace token)
 

@@ -29,14 +29,17 @@ Mixed Tier 1-3 problem distribution (uniform 1/3 each) with **raw full-width ope
 python examples/exploration/train_digit_transformer.py --steps 20000
 ```
 
-The training script lives **outside** the submission directory (in `examples/exploration/train_digit_transformer.py`) because it imports `sympy` for prime generation, which the static check rejects in submissions. Contestants train locally, then push only the submission directory (`manifest.json`, `model.py`, `weights.pt`) to HuggingFace.
+The training script lives **outside** the submission directory (in `examples/exploration/train_digit_transformer.py`, which is gitignored and therefore not part of a clone) because it imports `sympy` for prime generation, which the static check rejects in submissions. `dlp_grokking` ships its trainers in-repo and is the example to copy if you want a runnable training loop. Contestants train locally, then push only the submission directory (`manifest.json`, `model.py`, `weights.pt`) to HuggingFace.
 
 ## Score (public benchmark, seed = deadbeef × 8)
 
 | Total problems | overall_accuracy | highest_tier_above_90 | deterministic |
 |---|---|---|---|
-| 110 | 0.240 | -1 | True |
-| **1100** | **0.103** | **-1** | True |
+| 110 | 0.190 | 1 | True |
+| **1100** | **0.094** | **-1** | True |
+
+(`highest_tier_above_90` differs between the two rows because tier 1 sits right at the 90%
+threshold: with 10 problems/tier it clears it, with 100 problems/tier it does not.)
 
 Per-tier at total=1100:
 
@@ -46,7 +49,8 @@ Per-tier at total=1100:
 | 1 | **0.830** | 4 fixed primes {2, 3, 5, 7}, raw operands up to 32 bits. The model must learn the reduction itself: mod 2/5 (last digit) and mod 3 (digit sum) are learnable patterns; mod 7's positional-weight cycle over ~10 digits is harder — hence below the old pre-reduction version's 1.000 |
 | 2 | 0.040 | Random primes in [16, 255] with 48-bit raw operands; reduction + multiplication both unlearned at this scale |
 | 3 | 0.020 | ~6500 primes, 64-bit raw operands; edge cases only |
-| 4-10 | 0.020 | Untrained (prompts may not even fit MAX_LEN); scores from a/b∈{0,1} edge cases only |
+| 4-6 | 0.010-0.020 | Untrained; the raw prompt no longer fits the 80-token context, so the model answers from a clipped window and is right only on trivial `a`/`b ∈ {0,1}` cases |
+| 7-10 | 0.000 | Nothing survives. An earlier revision returned `[]` for over-long prompts, which decodes to `0` and collected the same ~2% these tiers used to show; that was non-learned code emitting an answer, so it is gone |
 
 ## What the math-loop notes about this result
 
@@ -64,5 +68,6 @@ Honest baseline:
 - Per-argument preprocess functions are pass-through identities. No cross-argument leakage.
 - `predict_digits` feeds the **raw** decimal strings to the model — no deterministic pre-reduction (`a % p` / `b % p` in non-learned code is a prohibited practice).
 - The model's emitted digit list materially determines the answer — the trained weights are doing the reduction *and* the modular multiplication.
+- **No non-learned code emits an answer.** Every problem is answered by the network; there is no fallback value and no branch on `a`, `b` or `p` that short-circuits it. Prompts longer than the trained context are clipped to the rightmost window — a tokenisation limit imposed by the finite positional-embedding table, not a decision about the answer. (The rules do not forbid an out-of-range fallback; these reference models simply hold to the stricter line so that the boundary is unambiguous.)
 - Passes the `modchallenge check` static analysis.
 - Deterministic (`eval()` mode, no dropout, no sampling).

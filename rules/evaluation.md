@@ -305,10 +305,12 @@ The repository ships three small, **compliant** reference models under `examples
 | Model | What it is | overall_accuracy (public, 1100) |
 |-------|------------|---------------------------------|
 | `always_zero` | Emits `[0]` for every problem — pipeline smoke test and leaderboard floor. | 0.079 |
-| `digit_transformer` | ~544K-param decoder-only Transformer fed the raw `(a, b, p)`; learns full-width reduction and modular multiplication end-to-end. | 0.103 |
-| `dlp_grokking` | ~6M-param discrete-log "grokking" model: a learned streaming reducer (raw operand digits fed one at a time on a feedback-free schedule), a shared residue encoder, an additive (log-space) bottleneck, and a learned decoder. | 0.093 |
+| `digit_transformer` | ~544K-param decoder-only Transformer fed the raw `(a, b, p)`; learns full-width reduction and modular multiplication end-to-end. | 0.094 |
+| `dlp_grokking` | ~6M-param discrete-log "grokking" model: a learned streaming reducer (raw operand digits fed one at a time on a feedback-free schedule), a shared residue encoder, an additive (log-space) bottleneck, and a learned decoder. | 0.085 |
 
 All three are deterministic and pass the static check. None hand-codes the arithmetic — reduction included: both neural models receive the **raw** `(a, b, p)` and produce the answer through trained parameters (deterministic pre-reduction of the operands is a prohibited practice; see above) — so they sit on the compliant side of the line, degrading honestly on the tiers they haven't learned rather than faking them. `dlp_grokking` is the most detailed worked example of the boundary: a *learned* streaming reducer using the allowed feedback-free digit-feeding schedule, plus a mathematical insight (`a*b mod p` as addition in discrete-log space) turned into a *learned* inductive bias.
+
+Both neural examples go one step further than the rules require: no branch in their inference path inspects `a`, `b` or `p` to short-circuit the network, and neither substitutes a fallback answer when it is out of its depth. **Emitting a constant when your model cannot handle an input is permitted** — `always_zero` does exactly that and scores 0.079, so a fallback is worth a few points on the tiers you have not learned. The reference models forgo those points to keep the learned/non-learned boundary in them unambiguous, which is why their overall numbers sit so close to the floor despite genuinely learning tier 1. Judge a model by its per-tier profile, not by `overall_accuracy` alone.
 
 Run any of them locally:
 

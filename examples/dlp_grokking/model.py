@@ -31,10 +31,18 @@ encoder pattern the rules explicitly allow) and whose trained weights carry
 out the residue update ``r' = (10*r + d) mod p``. Randomise the reducer's
 weights and the residues (and hence the answers) collapse.
 
+Every emitted digit comes from the network. There is no branch anywhere in
+the inference path that inspects ``a``, ``b`` or ``p`` and decides an answer
+in Python — not even to short-circuit inputs the model clearly cannot handle.
+The only non-learned step is tokenisation into the model's fixed-width slots,
+which reads each argument's own decimal representation and does no arithmetic
+against the others.
+
 Like all small-modulus approaches, this only works where the field is small
 enough for the structure to be learned and to generalise across primes — i.e.
 the low tiers. Above that the network has not learned anything useful and the
-score falls to the floor. That ceiling is the honest, expected outcome.
+score falls to the floor — all the way to the floor, since nothing catches it.
+That ceiling is the honest, expected outcome.
 """
 
 from __future__ import annotations
@@ -63,15 +71,25 @@ SLOT_RESIDUE = 0
 SLOT_PRIME = 1
 
 
+def _digits_from_str(s: str, width: int = WIDTH) -> list[int]:
+    """Decimal string -> fixed-width MSB-first digit tokens.
+
+    Pure tokenisation into the model's fixed-width slot: left-pad with zeros,
+    or keep the low-order ``width`` digits when the value is wider than the
+    slot. This reads one argument's own decimal representation and performs no
+    arithmetic against any other argument — it is the same kind of finite input
+    representation any tokenizer imposes.
+    """
+    s = s[-width:]
+    return [0] * (width - len(s)) + [int(c) for c in s]
+
+
 def _digits_fixed(n: int, width: int = WIDTH) -> list[int]:
-    """Non-negative int -> fixed-width zero-padded decimal digits, MSB-first."""
-    out = [0] * width
-    i = width - 1
-    while n > 0 and i >= 0:
-        out[i] = n % 10
-        n //= 10
-        i -= 1
-    return out
+    """Non-negative int -> fixed-width zero-padded decimal digits, MSB-first.
+
+    Used by the trainer (``train_reducer.py``) to build supervision targets.
+    """
+    return _digits_from_str(str(n), width)
 
 
 # ---------------------------------------------------------------------------
@@ -286,34 +304,24 @@ class DLPGrokking(ModularMultiplicationModel):
     @torch.no_grad()
     def predict_digits_batch(self, inputs):
         assert self.model is not None and self.reducer is not None
-        out: list[list[int] | None] = [None] * len(inputs)
 
-        a_digit_rows, b_digit_rows, p_rows, idx = [], [], [], []
-        for i, (a_enc, b_enc, p_enc) in enumerate(inputs):
-            p = int(p_enc)
-            # Out of the model's small-prime regime: it never learned this.
-            # Emit 0 (the honest fallback) without invoking the network.
-            # (Comparing p against the regime bound selects which model path
-            # runs; it computes nothing toward the answer.)
-            if p >= 10 ** WIDTH:
-                out[i] = [0]
-                continue
-            # RAW operand digits — reduction happens in the learned reducer.
-            a_digit_rows.append([int(c) for c in str(a_enc)])
-            b_digit_rows.append([int(c) for c in str(b_enc)])
-            p_rows.append(_digits_fixed(p))
-            idx.append(i)
+        # Every problem goes through the trained parameters. There is no
+        # branch on the value of p (or of anything else) that decides an
+        # answer in Python: tokenise, run the learned reducer, run the DLP
+        # core, emit its argmax. Where the model is out of its depth — a
+        # prime far wider than its WIDTH-digit slot — it emits whatever it
+        # emits and scores wrong, which is the honest outcome. Earlier
+        # revisions short-circuited large p to [0]; that was non-learned
+        # code producing the output, so it is gone.
+        a_digit_rows = [[int(c) for c in str(a_enc)] for a_enc, _, _ in inputs]
+        b_digit_rows = [[int(c) for c in str(b_enc)] for _, b_enc, _ in inputs]
+        p_rows = [_digits_from_str(str(p_enc)) for _, _, p_enc in inputs]
 
-        if idx:
-            p_t = torch.tensor(p_rows, dtype=torch.long, device=self.device)
-            a_res = self._learned_reduce(a_digit_rows, p_t)  # (N, WIDTH)
-            b_res = self._learned_reduce(b_digit_rows, p_t)
-            logits = self.model(a_res, b_res, p_t)  # (N, WIDTH, 10)
-            preds = logits.argmax(dim=-1).tolist()  # N x WIDTH
-            for j, i in enumerate(idx):
-                out[i] = preds[j]  # MSB-first; harness ignores leading zeros
-
-        return [o if o is not None else [0] for o in out]
+        p_t = torch.tensor(p_rows, dtype=torch.long, device=self.device)
+        a_res = self._learned_reduce(a_digit_rows, p_t)  # (N, WIDTH)
+        b_res = self._learned_reduce(b_digit_rows, p_t)
+        logits = self.model(a_res, b_res, p_t)  # (N, WIDTH, 10)
+        return logits.argmax(dim=-1).tolist()  # MSB-first digit lists
 
     def _learned_reduce(
         self, digit_rows: list[list[int]], p_t: torch.Tensor
